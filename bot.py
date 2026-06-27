@@ -7,17 +7,20 @@ from flask import Flask, request
 TOKEN = "YOUR_BALE_BOT_TOKEN"
 API = f"https://tapi.bale.ai/bot{TOKEN}"
 
-STOCKFISH_PATH = "./stockfish"
+STOCKFISH_PATH = "./stockfish"  # اگر نداری، ربات بدون AI هم کار می‌کنه
 
 app = Flask(__name__)
 
 games = {}
 
 def send(chat_id, text):
-    requests.post(f"{API}/sendMessage", json={
-        "chat_id": chat_id,
-        "text": text
-    })
+    try:
+        requests.post(f"{API}/sendMessage", json={
+            "chat_id": chat_id,
+            "text": text
+        })
+    except:
+        pass
 
 def render(board):
     return str(board)
@@ -27,10 +30,21 @@ def new_game(chat_id):
     games[chat_id] = board
     return board
 
+def get_ai_move(board):
+    """اگر stockfish نبود، حرکت رندوم می‌زند"""
+    try:
+        engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
+        result = engine.play(board, chess.engine.Limit(time=0.3))
+        engine.quit()
+        return result.move
+    except:
+        return list(board.legal_moves)[0]  # fallback ساده
+
+
 @app.route("/", methods=["POST"])
 def webhook():
     data = request.json
-    if "message" not in data:
+    if not data or "message" not in data:
         return "ok"
 
     msg = data["message"]
@@ -38,11 +52,14 @@ def webhook():
     text = msg.get("text", "").strip()
 
     if text == "/start":
-        send(chat_id, "♟️ خوش اومدی!\n/new برای شروع بازی")
+        send(chat_id,
+             "♟️ شطرنج آنلاین فعال شد!\n"
+             "/new برای شروع بازی")
 
     elif text == "/new":
         board = new_game(chat_id)
-        send(chat_id, "🎮 بازی شروع شد\nتو سفید هستی\n\n" + render(board))
+        send(chat_id,
+             "🎮 بازی شروع شد!\nتو سفید هستی\n\n" + render(board))
 
     elif chat_id in games:
         board = games[chat_id]
@@ -58,19 +75,18 @@ def webhook():
                     del games[chat_id]
                     return "ok"
 
-                engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
-                result = engine.play(board, chess.engine.Limit(time=0.5))
-                board.push(result.move)
-                engine.quit()
+                ai_move = get_ai_move(board)
+                board.push(ai_move)
 
-                send(chat_id, f"🤖 حرکت من: {result.move}\n\n{render(board)}")
+                send(chat_id,
+                     f"🤖 حرکت من: {ai_move}\n\n{render(board)}")
 
                 if board.is_game_over():
-                    send(chat_id, "🏁 پایان: " + board.result())
+                    send(chat_id, "🏁 پایان بازی: " + board.result())
                     del games[chat_id]
 
             else:
-                send(chat_id, "❌ حرکت غیرقانونی")
+                send(chat_id, "❌ حرکت غیرقانونی (مثلاً e2e4)")
 
         except:
             send(chat_id, "♟️ فرمت درست: e2e4")
